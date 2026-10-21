@@ -1,5 +1,6 @@
 using System.Text;
 using HumanResolve.ArgumentService.Auth;
+using HumanResolve.ArgumentService.Clients;
 using HumanResolve.ArgumentService.Repositories;
 using HumanResolve.ArgumentService.Services;
 using HumanResolve.ArgumentService.Messaging;
@@ -23,6 +24,15 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 builder.Services.AddGrpc();
+// Linking arguments to disputes is on only when the dispute (beef) service address is configured.
+if (builder.Configuration["BEEF_API_URL"] is { Length: > 0 } beefApiUrl)
+{
+    builder.Services.AddHttpClient<IBeefClient, HttpBeefClient>(client =>
+    {
+        client.BaseAddress = new Uri(beefApiUrl.TrimEnd('/') + "/");
+        client.Timeout = TimeSpan.FromSeconds(3);
+    });
+}
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(builder.Configuration["EVIDENCE_DB_CONNECTION"]
     ?? "Host=localhost;Port=5432;Database=evidence_db;Username=evidence;Password=evidence-local-only"));
 builder.Services.AddSingleton<IArgumentRepository, PostgresArgumentRepository>();

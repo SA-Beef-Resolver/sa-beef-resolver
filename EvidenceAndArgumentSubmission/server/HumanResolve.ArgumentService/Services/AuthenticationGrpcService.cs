@@ -35,6 +35,32 @@ public sealed class AuthenticationGrpcService(AuthRepository users, IPasswordSer
         return Task.FromResult(ToProto(user));
     }
 
+    public override Task<Proto.UserProfile> GetUserProfile(Proto.GetUserProfileRequest request, ServerCallContext context)
+    {
+        CallerId(context);
+        if (!Guid.TryParse(request.PersonId, out var personId)) throw Rpc(StatusCode.InvalidArgument, "person_id must be a UUID");
+        var user = users.FindById(personId) ?? throw Rpc(StatusCode.NotFound, "user was not found");
+        return Task.FromResult(new Proto.UserProfile { PersonId = user.PersonId.ToString(), DisplayName = user.DisplayName });
+    }
+
+    public override Task<Proto.SearchUsersResponse> SearchUsers(Proto.SearchUsersRequest request, ServerCallContext context)
+    {
+        var caller = CallerId(context);
+        var term = (request.Query ?? string.Empty).Trim();
+        if (term.Length < 2) throw Rpc(StatusCode.InvalidArgument, "query must contain at least 2 characters");
+        if (term.Length > 100) throw Rpc(StatusCode.InvalidArgument, "query must not exceed 100 characters");
+        var response = new Proto.SearchUsersResponse();
+        response.Users.AddRange(users.Search(term, caller, 10).Select(user => new Proto.UserProfile { PersonId = user.PersonId.ToString(), DisplayName = user.DisplayName }));
+        return Task.FromResult(response);
+    }
+
+    // Only signed-in users may look at other users' public profiles (display name and id, never email).
+    private static Guid CallerId(ServerCallContext context)
+    {
+        var claim = context.GetHttpContext().User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        return Guid.TryParse(claim, out var id) ? id : throw Rpc(StatusCode.Unauthenticated, "a valid bearer token is required");
+    }
+
     private Proto.AuthenticationResponse Response(AuthUser user)
     {
         var token = tokens.Create(user);

@@ -1,0 +1,14 @@
+{
+  "name": "web-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HTTP gateway that lets the React frontend call the gRPC evidence service, the Beef REST API and the AI result API",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node --check src/grpc.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.12.6",
+    "@grpc/proto-loader": "^0.7.15"
+  }
+}

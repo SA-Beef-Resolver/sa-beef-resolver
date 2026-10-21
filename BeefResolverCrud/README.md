@@ -1,5 +1,29 @@
 # Beef Resolver REST API
 
+## Account-linked mode (used in the full stack)
+
+When `JWT_SIGNING_KEY` is set (the root `docker-compose.yml` does this) every call needs `Authorization: Bearer <token>` from the evidence service, signed with the same key (`JWT_ISSUER` and `JWT_AUDIENCE` must match too). Without the key the API stays open, exactly like the original homework version below.
+
+A dispute then belongs to two accounts:
+
+| Field | Meaning |
+| --- | --- |
+| `person_a_id` | The creator. Always taken from the token, never from the request body. |
+| `person_b_id` | The opponent, an existing user account id. |
+| `person_a`, `person_b` | Display names stored for showing the dispute. |
+
+| Call | Rule |
+| --- | --- |
+| `GET /api/beefs` | Only your own disputes (as creator or opponent). |
+| `GET /api/beefs/:id` | Only the two people in it (403 otherwise). Old rows without account ids answer 422 and are hidden. |
+| `POST /api/beefs` | Body `{ "person_b_id", "person_b", "reason", "status" }`. The web gateway fills `person_b` from the real account. You cannot open a dispute with yourself. |
+| `PUT /api/beefs/:id` | Either person; only `reason` and `status` can change, the people are fixed. |
+| `DELETE /api/beefs/:id` | Only the creator. |
+
+Other settings: `PORT` (default 3000), `BEEF_DB_PATH` (SQLite file) and `SEED_MOCK_DATA=false` to start with an empty database. An existing database from the older schema is upgraded in place on start-up.
+
+The rest of this file describes the original homework API (names only, no login).
+
 This homework uses one resource, **beefs**. A row means `person_a has beef with person_b` and stores the reason and resolution status. The mock data shows the requested relationships: A has beef with B, C, D, and E; B has beef with A, C, and X.
 
 ## Set up on another computer

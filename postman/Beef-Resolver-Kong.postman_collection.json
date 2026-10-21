@@ -1,0 +1,585 @@
+{
+  "info": {
+    "name": "Beef Resolver via Kong",
+    "description": "Run the folders in order. A registers/logs in and stores the token and person_b_id automatically (it talks to the web gateway, not Kong). 0, 1 and 2 go through Kong. Tokens last 1 hour: re-run Login user A when they expire.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "A. Register / Login (web gateway :8081, sets token automatically)",
+      "item": [
+        {
+          "name": "Register user A (409 if it already exists)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Created or already exists\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email_a}}\",\n  \"password\": \"{{password_a}}\",\n  \"display_name\": \"{{person_a_name}}\"\n}"
+            },
+            "url": {
+              "raw": "{{web_gateway}}/api/register",
+              "host": [
+                "{{web_gateway}}"
+              ],
+              "path": [
+                "api",
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Register user B (409 if it already exists)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Created or already exists\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email_b}}\",\n  \"password\": \"{{password_b}}\",\n  \"display_name\": \"{{person_b_name}}\"\n}"
+            },
+            "url": {
+              "raw": "{{web_gateway}}/api/register",
+              "host": [
+                "{{web_gateway}}"
+              ],
+              "path": [
+                "api",
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login user A -> saves token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Logged in\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json(); pm.collectionVariables.set(\"token\", b.access_token); pm.environment.set(\"token\", b.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email_a}}\",\n  \"password\": \"{{password_a}}\"\n}"
+            },
+            "url": {
+              "raw": "{{web_gateway}}/api/login",
+              "host": [
+                "{{web_gateway}}"
+              ],
+              "path": [
+                "api",
+                "login"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login user B -> saves person_b_id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Logged in\", () => pm.response.to.have.status(200));",
+                  "const id = pm.response.json().user.person_id; pm.collectionVariables.set(\"person_b_id\", id); pm.environment.set(\"person_b_id\", id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email_b}}\",\n  \"password\": \"{{password_b}}\"\n}"
+            },
+            "url": {
+              "raw": "{{web_gateway}}/api/login",
+              "host": [
+                "{{web_gateway}}"
+              ],
+              "path": [
+                "api",
+                "login"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "0. Kong configuration (Admin API :8001)",
+      "item": [
+        {
+          "name": "List services",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"3 services\", () => pm.expect(pm.response.json().data.length).to.eql(3));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{kong_admin}}/services",
+              "host": [
+                "{{kong_admin}}"
+              ],
+              "path": [
+                "services"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List routes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"4 routes\", () => pm.expect(pm.response.json().data.length).to.eql(4));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{kong_admin}}/routes",
+              "host": [
+                "{{kong_admin}}"
+              ],
+              "path": [
+                "routes"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. REST through Kong (:8000)",
+      "item": [
+        {
+          "name": "GET all (no token -> 401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Went through Kong', () => pm.expect(pm.response.headers.get('Via') || '').to.include('kong'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{kong_proxy}}/api/beefs",
+              "host": [
+                "{{kong_proxy}}"
+              ],
+              "path": [
+                "api",
+                "beefs"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET all (with token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Went through Kong', () => pm.expect(pm.response.headers.get('Via') || '').to.include('kong'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{kong_proxy}}/api/beefs",
+              "host": [
+                "{{kong_proxy}}"
+              ],
+              "path": [
+                "api",
+                "beefs"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST create beef",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Went through Kong', () => pm.expect(pm.response.headers.get('Via') || '').to.include('kong'));",
+                  "pm.collectionVariables.set(\"dispute_id\", pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"person_a\": \"{{person_a_name}}\",\n  \"person_b_id\": \"{{person_b_id}}\",\n  \"person_b\": \"{{person_b_name}}\",\n  \"reason\": \"Who ate the last slice of pizza\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{kong_proxy}}/api/beefs",
+              "host": [
+                "{{kong_proxy}}"
+              ],
+              "path": [
+                "api",
+                "beefs"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET one",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Went through Kong', () => pm.expect(pm.response.headers.get('Via') || '').to.include('kong'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{kong_proxy}}/api/beefs/{{dispute_id}}",
+              "host": [
+                "{{kong_proxy}}"
+              ],
+              "path": [
+                "api",
+                "beefs",
+                "{{dispute_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT update (resolve)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Went through Kong', () => pm.expect(pm.response.headers.get('Via') || '').to.include('kong'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"They agreed to share the pizza next time.\",\n  \"status\": \"resolved\"\n}"
+            },
+            "url": {
+              "raw": "{{kong_proxy}}/api/beefs/{{dispute_id}}",
+              "host": [
+                "{{kong_proxy}}"
+              ],
+              "path": [
+                "api",
+                "beefs",
+                "{{dispute_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "DELETE",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Deleted', () => pm.expect(pm.response.code).to.be.oneOf([200, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{kong_proxy}}/api/beefs/{{dispute_id}}",
+              "host": [
+                "{{kong_proxy}}"
+              ],
+              "path": [
+                "api",
+                "beefs",
+                "{{dispute_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. AI result API through Kong",
+      "item": [
+        {
+          "name": "GET /ai/health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Went through Kong', () => pm.expect(pm.response.headers.get('Via') || '').to.include('kong'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{kong_proxy}}/ai/health",
+              "host": [
+                "{{kong_proxy}}"
+              ],
+              "path": [
+                "ai",
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "web_gateway",
+      "value": "http://127.0.0.1:8081"
+    },
+    {
+      "key": "email_a",
+      "value": "prof@example.com"
+    },
+    {
+      "key": "password_a",
+      "value": "Passw0rd!Demo1"
+    },
+    {
+      "key": "email_b",
+      "value": "rival@example.com"
+    },
+    {
+      "key": "password_b",
+      "value": "Passw0rd!Demo2"
+    },
+    {
+      "key": "dispute_id",
+      "value": ""
+    },
+    {
+      "key": "kong_proxy",
+      "value": "http://192.168.1.102:8000"
+    },
+    {
+      "key": "kong_admin",
+      "value": "http://192.168.1.102:8001"
+    },
+    {
+      "key": "kong_grpc",
+      "value": "192.168.1.102:9080"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "person_a_name",
+      "value": "Prof Demo"
+    },
+    {
+      "key": "person_b_id",
+      "value": ""
+    },
+    {
+      "key": "person_b_name",
+      "value": "Rival Demo"
+    }
+  ]
+}
