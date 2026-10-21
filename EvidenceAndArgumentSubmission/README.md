@@ -50,3 +50,9 @@ The server uses `127.0.0.1:50051` by default. Set `GRPC_PORT` to override its po
 - Uses `expected_version` for optimistic concurrency. An old version returns `ABORTED`, so a caller cannot silently overwrite a newer edit.
 - The C# `PostgresArgumentRepository` persists arguments, evidence, revisions and participant assignments in PostgreSQL via Npgsql without changing the CRUD `.proto` contract.
 - The Node.js sample client sets a five-second deadline and proves that gRPC is cross-language. For deployment, replace insecure localhost transport with TLS and derive `person_id` from authenticated identity rather than client input.
+
+## Linking to disputes
+
+When `BEEF_API_URL` is set (the root compose file sets it), `dispute_id` must be the numeric id of a dispute in the Beef REST API and the caller must be one of its two people. `CreateArgument`, `GetArgument`, `GetAllArguments` and `SubmitArgumentForAi` ask the dispute service (forwarding the caller's token) and answer `NOT_FOUND`, `PERMISSION_DENIED`, `FAILED_PRECONDITION` (resolved dispute, or an old unlinked one) or `UNAVAILABLE`. The AI side is derived: the creator is 1 and the opponent is 2, so `people` can be left out. Without `BEEF_API_URL` the old behaviour is kept.
+
+`AuthenticationService.SearchUsers` finds users by display name (at least 2 characters, up to 10 results, the caller excluded, no emails) so one can be chosen as an opponent. `GetUserProfile` returns a user's display name for a given id.
