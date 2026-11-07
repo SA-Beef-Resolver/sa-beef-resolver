@@ -1,4 +1,5 @@
 using Grpc.Core;
+using HumanResolve.ArgumentService.Clients;
 using HumanResolve.ArgumentService.Domain;
 using HumanResolve.ArgumentService.Repositories;
 using Proto = HumanResolve.Argument.V1;
@@ -11,23 +12,57 @@ using System.Text.RegularExpressions;
 namespace HumanResolve.ArgumentService.Services;
 
 public sealed class ArgumentGrpcService(IArgumentRepository repository, RabbitMqAiPublisher publisher,
-    AiParticipantRegistry participants, ILogger<ArgumentGrpcService> logger) : Proto.ArgumentService.ArgumentServiceBase
+    AiParticipantRegistry participants, ILogger<ArgumentGrpcService> logger, IBeefClient? beefs = null) : Proto.ArgumentService.ArgumentServiceBase
 {
     private const int DefaultPageSize = 20;
     private const int MaximumPageSize = 100;
+
+    // When the dispute service is configured (BEEF_API_URL), a dispute_id must be the id of a real dispute that the
+    // caller is a party to. Returns the caller's side (1 = creator, 2 = opponent), or 0 when linking is switched off.
+    private async Task<int> LinkToDisputeAsync(string disputeId, string personId, ServerCallContext context, bool requireOpen)
+    {
+        if (beefs is null) return 0;
+        if (!long.TryParse(disputeId, out var beefId) || beefId < 1)
+            throw Rpc(StatusCode.InvalidArgument, "dispute_id must be the numeric id of an existing dispute");
+        var header = context.GetHttpContext().Request.Headers.Authorization.ToString();
+        var token = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header[7..] : header;
+        BeefLookup lookup;
+        try { lookup = await beefs.GetBeefAsync(beefId, token, context.CancellationToken); }
+        catch (BeefServiceUnavailableException ex)
+        {
+            logger.LogWarning("Dispute service check failed: {Message}", ex.Message);
+            throw Rpc(StatusCode.Unavailable, "dispute service is unavailable; try again later");
+        }
+        var beef = lookup.Kind switch
+        {
+            BeefLookupKind.Found => lookup.Beef!,
+            BeefLookupKind.NotFound => throw Rpc(StatusCode.NotFound, "dispute was not found"),
+            BeefLookupKind.Forbidden => throw Rpc(StatusCode.PermissionDenied, "you are not a party to this dispute"),
+            _ => throw Rpc(StatusCode.FailedPrecondition, "this dispute is not linked to user accounts")
+        };
+        if (requireOpen && beef.Status == "resolved") throw Rpc(StatusCode.FailedPrecondition, "dispute is already resolved");
+        if (string.Equals(beef.PersonAId, personId, StringComparison.OrdinalIgnoreCase)) return 1;
+        if (string.Equals(beef.PersonBId, personId, StringComparison.OrdinalIgnoreCase)) return 2;
+        throw Rpc(StatusCode.PermissionDenied, "you are not a party to this dispute");
+    }
 
     public override async Task<Proto.SubmitArgumentForAiResponse> SubmitArgumentForAi(
         Proto.SubmitArgumentForAiRequest request, ServerCallContext context)
     {
         var id = ParseGuid(request.ArgumentId, "argument_id");
         var person = CurrentUserId(context);
-        if (request.People is not (1 or 2)) throw Rpc(StatusCode.InvalidArgument, "people must be 1 or 2");
         var record = repository.Get(id) ?? throw Rpc(StatusCode.NotFound, "argument was not found");
         if (record.PersonId != person) throw Rpc(StatusCode.PermissionDenied, "only the author may submit this argument");
         if (request.ExpectedVersion != record.Version) throw Rpc(StatusCode.Aborted, "argument changed; fetch its latest version");
         if (record.Status != DomainArgumentStatus.Submitted) throw Rpc(StatusCode.FailedPrecondition, "save argument with SUBMITTED status first");
         if (!Regex.IsMatch(record.DisputeId, "\\A[A-Za-z0-9_-]{1,128}\\z"))
             throw Rpc(StatusCode.InvalidArgument, "dispute_id must be compatible with AI sessionId (letters/digits/_/-)");
+        // With linked disputes the side comes from the account (creator = 1, opponent = 2) and a mismatching request is refused.
+        var derivedSide = await LinkToDisputeAsync(record.DisputeId, person, context, requireOpen: true);
+        if (derivedSide != 0 && request.People != 0 && request.People != derivedSide)
+            throw Rpc(StatusCode.InvalidArgument, $"people must be {derivedSide} for your role in this dispute (or omitted)");
+        var people = derivedSide != 0 ? derivedSide : request.People;
+        if (people is not (1 or 2)) throw Rpc(StatusCode.InvalidArgument, "people must be 1 or 2");
         // Evidence references are claims/metadata; the worker does not download files.
         var message = JsonSerializer.Serialize(new
         {
@@ -36,14 +71,14 @@ public sealed class ArgumentGrpcService(IArgumentRepository repository, RabbitMq
         }, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         if (message.EnumerateRunes().Count() > 8000)
             throw Rpc(StatusCode.InvalidArgument, "AI message including evidence metadata exceeds 8000 characters");
-        if (!participants.TryBind(record.DisputeId, person, request.People))
+        if (!participants.TryBind(record.DisputeId, person, people))
             throw Rpc(StatusCode.FailedPrecondition, "side is already assigned to another author or author switched sides");
         var messageId = $"argument_{record.ArgumentId:N}_v{record.Version}";
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
         try
         {
-            await publisher.PublishAsync(record.DisputeId, request.People, message, messageId, timeout.Token);
+            await publisher.PublishAsync(record.DisputeId, people, message, messageId, timeout.Token);
         }
         catch (Exception ex)
         {
@@ -53,24 +88,29 @@ public sealed class ArgumentGrpcService(IArgumentRepository repository, RabbitMq
         return new Proto.SubmitArgumentForAiResponse { SessionId = record.DisputeId, MessageId = messageId, Queued = true };
     }
 
-    public override Task<Proto.Argument> CreateArgument(Proto.CreateArgumentRequest request, ServerCallContext context)
+    public override async Task<Proto.Argument> CreateArgument(Proto.CreateArgumentRequest request, ServerCallContext context)
     {
         var disputeId = Required(request.DisputeId, "dispute_id");
         var statement = Required(request.Statement, "statement", 10_000);
-        var record = repository.Create(disputeId, CurrentUserId(context), statement, ToEvidence(request.Evidence), ToDomainStatus(request.Status));
-        return Task.FromResult(ToProto(record));
+        var person = CurrentUserId(context);
+        var evidence = ToEvidence(request.Evidence);
+        var status = ToDomainStatus(request.Status);
+        await LinkToDisputeAsync(disputeId, person, context, requireOpen: true);
+        return ToProto(repository.Create(disputeId, person, statement, evidence, status));
     }
 
-    public override Task<Proto.Argument> GetArgument(Proto.GetArgumentRequest request, ServerCallContext context)
+    public override async Task<Proto.Argument> GetArgument(Proto.GetArgumentRequest request, ServerCallContext context)
     {
         var id = ParseGuid(request.ArgumentId, "argument_id");
         var record = repository.Get(id) ?? throw Rpc(StatusCode.NotFound, "argument was not found");
-        return Task.FromResult(ToProto(record));
+        await LinkToDisputeAsync(record.DisputeId, CurrentUserId(context), context, requireOpen: false);
+        return ToProto(record);
     }
 
-    public override Task<Proto.GetAllArgumentsResponse> GetAllArguments(Proto.GetAllArgumentsRequest request, ServerCallContext context)
+    public override async Task<Proto.GetAllArgumentsResponse> GetAllArguments(Proto.GetAllArgumentsRequest request, ServerCallContext context)
     {
         var disputeId = Required(request.DisputeId, "dispute_id");
+        await LinkToDisputeAsync(disputeId, CurrentUserId(context), context, requireOpen: false);
         var personId = string.IsNullOrWhiteSpace(request.PersonId) ? null : Required(request.PersonId, "person_id");
         var offset = ParsePageToken(request.PageToken);
         var pageSize = request.PageSize == 0 ? DefaultPageSize : request.PageSize;
@@ -78,7 +118,7 @@ public sealed class ArgumentGrpcService(IArgumentRepository repository, RabbitMq
         var records = repository.GetAll(disputeId, personId, offset, pageSize, out var hasNextPage);
         var response = new Proto.GetAllArgumentsResponse { NextPageToken = hasNextPage ? (offset + records.Count).ToString() : string.Empty };
         response.Arguments.AddRange(records.Select(ToProto));
-        return Task.FromResult(response);
+        return response;
     }
 
     public override Task<Proto.Argument> UpdateArgument(Proto.UpdateArgumentRequest request, ServerCallContext context)

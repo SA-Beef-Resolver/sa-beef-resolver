@@ -1,0 +1,39 @@
+# Kong declarative config (DB-less mode). Hostnames are Compose service names.
+_format_version: "3.0"
+
+services:
+  # REST: Beef Resolver CRUD (Node.js)
+  - name: beef-rest-service
+    url: http://beef-crud-service:3000
+    routes:
+      - name: beef-rest-route
+        protocols: [http, https]
+        paths:
+          - /api/beefs
+        strip_path: false
+
+  # gRPC: Evidence & Argument Submission (.NET, plaintext HTTP/2).
+  # Kong matches gRPC routes on /<proto package>.<Service>.
+  - name: evidence-grpc-service
+    protocol: grpc
+    host: evidence-service
+    port: 50051
+    routes:
+      - name: evidence-authentication-grpc-route
+        protocols: [grpc, grpcs]
+        paths:
+          - /humanresolve.argument.v1.AuthenticationService
+      - name: evidence-argument-grpc-route
+        protocols: [grpc, grpcs]
+        paths:
+          - /humanresolve.argument.v1.ArgumentService
+
+  # REST: read-only AI resolution results (Python)
+  - name: ai-result-service
+    url: http://ai-api:8000
+    routes:
+      - name: ai-result-route
+        protocols: [http, https]
+        paths:
+          - /ai/
+        strip_path: true

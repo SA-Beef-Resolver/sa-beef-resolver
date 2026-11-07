@@ -31,7 +31,7 @@ services:
       POSTGRES_USER: evidence
       POSTGRES_PASSWORD: evidence-local-only
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -45,7 +45,7 @@ services:
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     restart: unless-stopped
     ports:
-      - "127.0.0.1:27017:27017"
+      - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
     volumes:
       - mongo-data:/data/db
     healthcheck:
@@ -130,7 +130,9 @@ services:
       EVIDENCE_DB_CONNECTION: Host=postgres;Port=5432;Database=evidence_db;Username=evidence;Password=evidence-local-only
       Authentication__Jwt__Issuer: humanresolve.evidence-service
       Authentication__Jwt__Audience: humanresolve.clients
-      Authentication__Jwt__SigningKey: development-only-change-this-to-a-unique-32-character-secret
+      Authentication__Jwt__SigningKey: ${JWT_SIGNING_KEY:-development-only-change-this-to-a-unique-32-character-secret}
+      # Arguments may only be written to real disputes by the two people in them.
+      BEEF_API_URL: http://beef-crud-service:3000
     ports:
       - "127.0.0.1:50051:50051"
     depends_on:
@@ -142,6 +144,8 @@ services:
         condition: service_started
       ai-worker-1:
         condition: service_started
+      beef-crud-service:
+        condition: service_started
 
   beef-crud-service:
     image: sa-beef-crud:local
@@ -151,10 +155,83 @@ services:
     environment:
       PORT: "3000"
       BEEF_DB_PATH: /data/beef-resolver.db
+      # Same key the evidence service signs login tokens with, so disputes belong to real accounts.
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-development-only-change-this-to-a-unique-32-character-secret}
+      JWT_ISSUER: humanresolve.evidence-service
+      JWT_AUDIENCE: humanresolve.clients
+      SEED_MOCK_DATA: "false"
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
       - beef-crud-data:/data
+
+  ai-api:
+    image: sa-beef-ai-worker:local
+    build:
+      context: ./AIProblemResolution
+    restart: unless-stopped
+    command: ["python", "api.py"]
+    environment:
+      MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+      MONGO_DATABASE: ai_resolution_db
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+
+  web-gateway:
+    image: sa-beef-web:local
+    build:
+      context: .
+      dockerfile: WebGateway/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "8081"
+      GRPC_HOST: evidence-service
+      GRPC_PORT: "50051"
+      BEEF_API_URL: http://beef-crud-service:3000
+      AI_API_URL: http://ai-api:8000
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      - evidence-service
+      - beef-crud-service
+      - ai-api
+
+  # Kong API Gateway (DB-less) in front of the REST and gRPC services.
+  # Set KONG_PUBLIC_HOST to this machine's LAN IP (see `ipconfig`) so Kong Manager
+  # can reach the Admin API from the browser. Ports bind to all interfaces so the
+  # LAN IP works; set KONG_BIND=127.0.0.1 to keep Kong local-only.
+  kong:
+    image: kong:3.9
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:9080 http2
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_ADMIN_GUI_LISTEN: 0.0.0.0:8002
+      KONG_ADMIN_GUI_URL: http://${KONG_PUBLIC_HOST:-localhost}:8002
+      KONG_ADMIN_GUI_API_URL: http://${KONG_PUBLIC_HOST:-localhost}:8001
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+    volumes:
+      - ./kong/kong.yml:/kong/kong.yml:ro
+    ports:
+      - "${KONG_BIND:-0.0.0.0}:8000:8000"   # REST proxy
+      - "${KONG_BIND:-0.0.0.0}:9080:9080"   # gRPC proxy (HTTP/2)
+      - "${KONG_BIND:-0.0.0.0}:8001:8001"   # Admin API
+      - "${KONG_BIND:-0.0.0.0}:8002:8002"   # Kong Manager
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    depends_on:
+      - beef-crud-service
+      - evidence-service
+      - ai-api
 
   demo-client:
     profiles: ["tools"]

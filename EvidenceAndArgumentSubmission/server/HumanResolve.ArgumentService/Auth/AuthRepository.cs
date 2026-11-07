@@ -31,6 +31,20 @@ public sealed class AuthRepository(NpgsqlDataSource source)
         return reader.Read() ? Read(reader) : null;
     }
 
+    // Display-name search for choosing an opponent. Wildcards in the term are escaped and password hashes are not loaded.
+    public IReadOnlyList<AuthUser> Search(string term, Guid excludePersonId, int limit)
+    {
+        var escaped = term.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+        using var command = source.CreateCommand("SELECT person_id,email,display_name,'',created_at FROM users WHERE display_name ILIKE $1 ESCAPE '\\' AND person_id <> $2 ORDER BY display_name, person_id LIMIT $3");
+        command.Parameters.AddWithValue($"%{escaped}%");
+        command.Parameters.AddWithValue(excludePersonId);
+        command.Parameters.AddWithValue(limit);
+        using var reader = command.ExecuteReader();
+        var found = new List<AuthUser>();
+        while (reader.Read()) found.Add(Read(reader));
+        return found;
+    }
+
     public AuthUser Create(string email, string displayName, string passwordHash)
     {
         var user = new AuthUser(Guid.NewGuid(), email, displayName, passwordHash, DateTimeOffset.UtcNow);
