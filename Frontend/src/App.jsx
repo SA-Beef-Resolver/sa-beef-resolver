@@ -63,18 +63,21 @@ function Nav() {
 }
 
 export default function App() {
+  const location = useLocation();
   return (
     <>
       <Nav />
       <main className="page">
-        <Routes>
-          <Route path="/login" element={<AuthPage mode="login" />} />
-          <Route path="/register" element={<AuthPage mode="register" />} />
-          <Route path="/" element={<Protected><Disputes /></Protected>} />
-          <Route path="/guide" element={<Guide />} />
-          <Route path="/disputes/:id" element={<Protected><DisputeDetail /></Protected>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <div key={location.pathname} className="route-stage">
+          <Routes>
+            <Route path="/login" element={<AuthPage mode="login" />} />
+            <Route path="/register" element={<AuthPage mode="register" />} />
+            <Route path="/" element={<Protected><Disputes /></Protected>} />
+            <Route path="/guide" element={<Guide />} />
+            <Route path="/disputes/:id" element={<Protected><DisputeDetail /></Protected>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
       </main>
     </>
   );

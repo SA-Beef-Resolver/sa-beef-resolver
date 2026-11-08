@@ -151,7 +151,10 @@ function serveStatic(request, response, url) {
   if (!file.startsWith(STATIC_DIR)) { response.writeHead(403); return response.end(); }
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(STATIC_DIR, 'index.html'); // SPA fallback
   if (!fs.existsSync(file)) return send(response, 404, { error: 'Frontend has not been built.' });
-  response.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+  response.writeHead(200, {
+    'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+    ...(path.extname(file) === '.html' ? { 'Cache-Control': 'no-store' } : {})
+  });
   fs.createReadStream(file).pipe(response);
 }
 

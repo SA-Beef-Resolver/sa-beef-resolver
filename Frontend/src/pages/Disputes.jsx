@@ -7,6 +7,20 @@ import UserPicker from '../components/UserPicker';
 
 const sameId = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 
+function moveHero(event) {
+  if (event.pointerType === 'touch' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const bounds = event.currentTarget.getBoundingClientRect();
+  const x = (event.clientX - bounds.left) / bounds.width - 0.5;
+  const y = (event.clientY - bounds.top) / bounds.height - 0.5;
+  event.currentTarget.style.setProperty('--parallax-x', `${Math.round(x * 22)}px`);
+  event.currentTarget.style.setProperty('--parallax-y', `${Math.round(y * 16)}px`);
+}
+
+function resetHero(event) {
+  event.currentTarget.style.setProperty('--parallax-x', '0px');
+  event.currentTarget.style.setProperty('--parallax-y', '0px');
+}
+
 export default function Disputes() {
   const { user } = useAuth();
   const location = useLocation();
@@ -101,7 +115,8 @@ export default function Disputes() {
 
   return (
     <>
-      <section className="dashboard-hero">
+      <section className="dashboard-hero" onPointerMove={moveHero} onPointerLeave={resetHero}>
+        <span className="hero-arc" aria-hidden="true" />
         <div><p className="eyebrow">Your space</p><h1>Find a way forward.</h1><p>Make room for both sides of the story, then work toward a better next step.</p><a className="button hero-button" href="#new-dispute">Start a dispute <Icon name="arrow" size={17}/></a></div>
         <div className="hero-aside"><span className="hero-aside-number">01 <span>/ 03</span></span><p>A calmer way to talk things through.</p><span>Start with what happened. The rest can follow.</span></div>
       </section>
