@@ -145,13 +145,31 @@ services:
       ai-worker-1:
         condition: service_started
       beef-crud-service:
-        condition: service_started
+        condition: service_healthy
+
+  beef-db-permissions:
+    image: sa-beef-crud:local
+    build:
+      context: ./BeefResolverCrud
+    user: "0:0"
+    entrypoint: ["sh", "-c", "chown -R node:node /data"]
+    restart: "no"
+    volumes:
+      - beef-crud-data:/data
 
   beef-crud-service:
     image: sa-beef-crud:local
     build:
       context: ./BeefResolverCrud
+    depends_on:
+      beef-db-permissions:
+        condition: service_completed_successfully
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     environment:
       PORT: "3000"
       BEEF_DB_PATH: /data/beef-resolver.db
@@ -193,9 +211,12 @@ services:
     ports:
       - "127.0.0.1:8081:8081"
     depends_on:
-      - evidence-service
-      - beef-crud-service
-      - ai-api
+      evidence-service:
+        condition: service_started
+      beef-crud-service:
+        condition: service_healthy
+      ai-api:
+        condition: service_started
 
   # Kong API Gateway (DB-less) in front of the REST and gRPC services.
   # Set KONG_PUBLIC_HOST to this machine's LAN IP (see `ipconfig`) so Kong Manager
@@ -229,9 +250,12 @@ services:
       timeout: 10s
       retries: 10
     depends_on:
-      - beef-crud-service
-      - evidence-service
-      - ai-api
+      beef-crud-service:
+        condition: service_healthy
+      evidence-service:
+        condition: service_started
+      ai-api:
+        condition: service_started
 
   demo-client:
     profiles: ["tools"]

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
+import Icon from '../components/Icon';
 
 export default function AuthPage({ mode }) {
   const { user, signIn, signUp } = useAuth();
@@ -31,10 +32,21 @@ export default function AuthPage({ mode }) {
   }
 
   return (
-    <section className="card narrow">
-      <h1>{isRegister ? 'Create account' : 'Sign in'}</h1>
-      <p className="muted">Resolve a beef with a friend: state your side, add evidence, get a neutral AI suggestion.</p>
-      <form onSubmit={submit}>
+    <div className="auth-layout">
+      <aside className="auth-story">
+        <p className="eyebrow">A better way through disagreement</p>
+        <h1>Make room for<br /><em>both sides.</em></h1>
+        <p>Start with what happened. Invite the other person to respond. Keep the evidence and the conversation in one place.</p>
+        <div className="auth-story-footer"><span className="story-rule" />A clearer path from conflict to resolution.</div>
+      </aside>
+      <section className="auth-form-wrap">
+        <div className="auth-form-head">
+          <span className="auth-form-icon"><Icon name="users" size={22}/></span>
+          <p className="eyebrow">{isRegister ? 'Get started' : 'Welcome back'}</p>
+          <h2>{isRegister ? 'Create your account' : 'Sign in to your account'}</h2>
+          <p className="lead">{isRegister ? 'Create an account to start and manage your disputes.' : 'Pick up where your conversation left off.'}</p>
+        </div>
+        <form onSubmit={submit}>
         {isRegister && (
           <label>Display name
             <input value={form.displayName} onChange={set('displayName')} required maxLength={100} placeholder="Maya" />
@@ -48,11 +60,12 @@ export default function AuthPage({ mode }) {
             autoComplete={isRegister ? 'new-password' : 'current-password'} />
         </label>
         {error && <p className="error" role="alert">{error}</p>}
-        <button type="submit" disabled={busy}>{busy ? 'Please wait...' : isRegister ? 'Register' : 'Sign in'}</button>
+        <button className="auth-submit" type="submit" disabled={busy}>{busy ? 'Please wait...' : isRegister ? 'Create account' : 'Sign in'} <Icon name="arrow" size={17}/></button>
       </form>
-      <p className="muted">
+      <p className="muted auth-switch">
         {isRegister ? <>Already have an account? <Link to="/login">Sign in</Link></> : <>New here? <Link to="/register">Create an account</Link></>}
       </p>
-    </section>
+      </section>
+    </div>
   );
 }

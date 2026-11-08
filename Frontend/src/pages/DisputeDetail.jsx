@@ -87,14 +87,14 @@ export default function DisputeDetail() {
   return (
     <>
       <p><Link to="/">&larr; All disputes</Link></p>
-      <section className="card">
+      <section className="card detail-header">
         <div className="row">
-          <h1>#{dispute.id} {dispute.person_a} vs {dispute.person_b}</h1>
+          <div><p className="eyebrow">Dispute #{dispute.id}</p><h1>{dispute.person_a} and {dispute.person_b}</h1></div>
           <span className={`badge ${dispute.status}`}>{dispute.status}</span>
         </div>
         <p>{dispute.reason}</p>
         <p data-testid="my-role">You are <strong>side {mySide}</strong> ({iAmCreator ? 'you opened this dispute' : 'you were named as the opponent'}) against <strong>{opponentName}</strong>.</p>
-        <p className="muted">Arguments are saved in PostgreSQL by the evidence service; the AI result is stored in MongoDB.</p>
+        <p className="muted">Each person can share their view before reviewing a suggested resolution.</p>
       </section>
 
       {error && <p className="error" role="alert">{error}</p>}
