@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from core import InvalidMessage, OllamaModel, RESULT_FIELDS, RetryableError, Store, validate
+from core import InvalidMessage, OllamaModel, RESULT_FIELDS, RetryableError, Store, language_for_history, validate
 from pymongo.collection import Collection
 
 
@@ -129,6 +129,34 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(self.store.get_session("A")["messageCount"], 1)
 
 
+class LanguageTests(unittest.TestCase):
+    @staticmethod
+    def argument(side, statement, argument_id, version=1):
+        return {"people": side, "message": json.dumps({
+            "argumentId": argument_id, "version": version, "statement": statement,
+            "evidence": [{"type": "LINK", "url": "https://example.com/english-evidence", "description": "photo"}]
+        }, ensure_ascii=False)}
+
+    def test_thai_statements_ignore_english_json_metadata_and_urls(self):
+        history = [self.argument(1, "ฉันยืมหนังสือแล้วคืนให้เขา", "a"),
+                   self.argument(2, "ฉันยังไม่ได้รับหนังสือคืน", "b")]
+        self.assertEqual(language_for_history(history), "Thai")
+
+    def test_one_english_argument_selects_english(self):
+        history = [self.argument(1, "ฉันยืมหนังสือแล้วคืนให้เขา", "a"),
+                   self.argument(2, "I did not receive the book back.", "b")]
+        self.assertEqual(language_for_history(history), "English")
+
+    def test_latest_revision_controls_language(self):
+        history = [self.argument(1, "I returned the book.", "a", 1),
+                   self.argument(1, "ฉันคืนหนังสือแล้ว", "a", 2),
+                   self.argument(2, "ฉันยังไม่ได้รับหนังสือคืน", "b")]
+        self.assertEqual(language_for_history(history), "Thai")
+
+    def test_plain_text_english_arguments(self):
+        self.assertEqual(language_for_history([{"people": 1, "message": "I returned it."}]), "English")
+
+
 class OllamaHttpTests(unittest.TestCase):
     def test_actual_http_adapter_sends_fresh_session_context_and_validates_response(self):
         requests = []
@@ -149,11 +177,19 @@ class OllamaHttpTests(unittest.TestCase):
             model = OllamaModel()
             model.url = "http://127.0.0.1:" + str(server.server_port)
             model.resolve("A", [{"people": 1, "message": "SECRET_A"}])
-            model.resolve("B", [{"people": 2, "message": "SECRET_B"}])
+            model.resolve("B", [LanguageTests.argument(2, "I have the book.", "b", 1),
+                                LanguageTests.argument(2, "ฉันยังไม่ได้รับหนังสือคืน", "b", 2)])
             self.assertNotIn("SECRET_A", json.dumps(requests[1]))
             self.assertFalse(requests[0]["stream"])
             self.assertFalse(requests[0]["think"])
+            self.assertEqual(set(requests[0]["format"]["required"]), RESULT_FIELDS)
+            self.assertTrue(all(field["type"] == "string" for field in requests[0]["format"]["properties"].values()))
             self.assertEqual(len(requests[1]["messages"]), 2)
+            current = json.loads(requests[1]["messages"][1]["content"])["arguments"]
+            self.assertEqual(len(current), 1)
+            self.assertEqual(json.loads(current[0]["message"])["version"], 2)
+            self.assertIn("Write all five JSON string values in English", requests[0]["messages"][0]["content"])
+            self.assertIn("Write all five JSON string values in natural Thai", requests[1]["messages"][0]["content"])
         finally:
             server.shutdown()
             server.server_close()
